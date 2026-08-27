@@ -1,0 +1,88 @@
+// Prisma schema for the Multi-Platform Integration Dashboard.
+//
+// This file currently covers the Better Auth core models only (User / Session /
+// Account / Verification). Integration, Requirement, Story, Task and PushRecord
+// models arrive with their own feature slices — see the project spec.
+//
+// Table names are lower-cased via @@map because Better Auth's Prisma adapter
+// addresses models by their lower-cased name; the mapping keeps the SQL schema
+// consistent with that convention.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions Session[]
+  accounts Account[]
+
+  @@map("user")
+}
+
+/// Sessions live in Postgres (not in a signed cookie) so that sign-out and
+/// revocation take effect immediately across devices.
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+/// One row per social identity (Google / Microsoft Entra ID / GitHub).
+/// These are *login* identities — integration tokens for Jira/Linear/Notion are
+/// a separate, encrypted-at-rest model added by the integrations slice.
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
