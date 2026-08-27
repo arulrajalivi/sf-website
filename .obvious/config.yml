@@ -1,0 +1,5 @@
+# .obvious/config.yml — repo policy for Obvious workers.
+# Auto-generated during onboarding (empty-repository scaffold run).
+defaultBranch: main      # auto-detected from GitHub repo settings
+mergeMethod: squash      # squash | merge | rebase — all three enabled on this repo
+requireHumanMerge: true  # a human must review and merge PRs into main
