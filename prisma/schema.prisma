@@ -1,8 +1,8 @@
 // Prisma schema for the Multi-Platform Integration Dashboard.
 //
-// This file currently covers the Better Auth core models only (User / Session /
-// Account / Verification). Integration, Requirement, Story, Task and PushRecord
-// models arrive with their own feature slices — see the project spec.
+// This file covers the Better Auth core models (User / Session / Account /
+// Verification) and the requirement → story → task draft spine. Integration and
+// PushRecord models arrive with their own feature slices — see the project spec.
 //
 // Table names are lower-cased via @@map because Better Auth's Prisma adapter
 // addresses models by their lower-cased name; the mapping keeps the SQL schema
@@ -26,8 +26,9 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  sessions Session[]
-  accounts Account[]
+  sessions     Session[]
+  accounts     Account[]
+  requirements Requirement[]
 
   @@map("user")
 }
@@ -73,6 +74,65 @@ model Account {
   @@unique([providerId, accountId])
   @@index([userId])
   @@map("account")
+}
+
+/// A requirement as the user typed it, saved before any LLM call runs.
+///
+/// `rawText` is the durable part: generation can fail (rate limit, malformed
+/// output) and the user must be able to retry without retyping, so the row is
+/// written first and the draft is attached to it afterwards.
+model Requirement {
+  id        String   @id @default(cuid())
+  title     String
+  rawText   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  stories Story[]
+
+  @@index([userId])
+  @@map("requirement")
+}
+
+/// One generated user story, editable in-app before it is pushed anywhere.
+model Story {
+  id                 String   @id @default(cuid())
+  title              String
+  description        String
+  /// Given/When/Then lines, kept ordered as written.
+  acceptanceCriteria String[]
+  /// Display order within the requirement; regeneration rewrites the set.
+  order              Int
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  requirementId String
+  requirement   Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+
+  tasks Task[]
+
+  @@index([requirementId])
+  @@map("story")
+}
+
+/// A unit of work under a story. Pushed as a Jira subtask / Linear issue /
+/// Notion to-do by the push slice; here it is draft content only.
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  order       Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  storyId String
+  story   Story  @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  @@index([storyId])
+  @@map("task")
 }
 
 model Verification {
