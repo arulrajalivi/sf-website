@@ -1,0 +1,11 @@
+{
+  "object": "list",
+  "results": [
+    {
+      "object": "block",
+      "id": "5c4b3a29-0000-4000-8000-000000000003",
+      "type": "to_do",
+      "to_do": { "rich_text": [], "checked": false }
+    }
+  ]
+}
