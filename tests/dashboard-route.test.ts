@@ -55,6 +55,14 @@ vi.mock("@/lib/auth", () => ({
   }),
 }));
 
+// The requirements page lists the caller's own requirements, so the route test
+// needs a database that answers rather than one that demands DATABASE_URL.
+vi.mock("@/lib/prisma", async () => {
+  const { fakePrisma } = await import("./support/fake-prisma");
+  return { prisma: fakePrisma };
+});
+
+const { resetFakePrisma } = await import("./support/fake-prisma");
 const { SIGN_IN_PATH, getCurrentSession } = await import("@/lib/session");
 const { DASHBOARD_NAV_ITEMS } = await import("@/app/dashboard/nav-items");
 const DashboardPage = (await import("@/app/dashboard/page")).default;
@@ -76,6 +84,7 @@ beforeEach(() => {
   state.cookieHeader = undefined;
   state.sessionsByToken = new Map([["valid-token", SESSION]]);
   state.getSessionCalls = 0;
+  resetFakePrisma();
 });
 
 describe("GET /dashboard", () => {

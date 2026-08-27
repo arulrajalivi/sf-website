@@ -51,6 +51,16 @@ describe("prisma schema — Better Auth contract", () => {
     });
   }
 
+  it("keys the draft spine to its owner and cascades on delete", () => {
+    // A requirement is one user's private draft in v1; the cascade is what makes
+    // "delete my account" actually remove the drafts rather than orphan them.
+    expect(modelBody("Requirement")).toMatch(
+      /user\s+User\s+@relation\(fields: \[userId\], references: \[id\], onDelete: Cascade\)/,
+    );
+    expect(modelBody("Story")).toMatch(/onDelete: Cascade/);
+    expect(modelBody("Task")).toMatch(/onDelete: Cascade/);
+  });
+
   it("stores sessions in the database, keyed to a user", () => {
     expect(modelBody("Session")).toMatch(
       /user\s+User\s+@relation\(fields: \[userId\], references: \[id\], onDelete: Cascade\)/,
@@ -64,15 +74,9 @@ describe("prisma schema — Better Auth contract", () => {
  * for every model is asserted to exist in the migration history.
  */
 describe("prisma migrations", () => {
-  const migrationSql = readFileSync(
-    fileURLToPath(
-      new URL(
-        "../prisma/migrations/20260827000000_init/migration.sql",
-        import.meta.url,
-      ),
-    ),
-    "utf8",
-  );
+  const migrationSql = readMigration("20260827000000_init");
+  const draftMigrationSql = readMigration("20260827120000_requirement_story_task");
+  const allMigrationSql = `${migrationSql}\n${draftMigrationSql}`;
 
   it.each(Object.keys(REQUIRED_MODEL_FIELDS))(
     "creates the table backing %s",
@@ -82,4 +86,32 @@ describe("prisma migrations", () => {
       expect(migrationSql).toContain(`CREATE TABLE "${table}"`);
     },
   );
+
+  it.each(["Requirement", "Story", "Task"])(
+    "creates the table backing %s",
+    (model) => {
+      const table = modelBody(model).match(/@@map\("([^"]+)"\)/)?.[1];
+      expect(table, `${model} must declare an @@map table name`).toBeDefined();
+      expect(allMigrationSql).toContain(`CREATE TABLE "${table}"`);
+    },
+  );
+
+  /**
+   * The draft slice must not rewrite the auth foundation's migration: a
+   * migration already applied to a database is immutable, and editing one in
+   * place makes every existing deploy diverge from the repository silently.
+   */
+  it("adds the draft tables in a new migration rather than editing the applied one", () => {
+    expect(migrationSql).not.toContain('CREATE TABLE "requirement"');
+    expect(draftMigrationSql).toContain('CREATE TABLE "requirement"');
+  });
 });
+
+function readMigration(name: string): string {
+  return readFileSync(
+    fileURLToPath(
+      new URL(`../prisma/migrations/${name}/migration.sql`, import.meta.url),
+    ),
+    "utf8",
+  );
+}
