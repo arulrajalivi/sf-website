@@ -15,10 +15,26 @@ jobs:
   verify:
     name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
+    services:
+      # A throwaway database so the committed migrations are proven to apply,
+      # rather than only proven to parse.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
-      # Placeholders only. `prisma generate` and `next build` need these names to
-      # exist; neither step opens a connection or performs an OAuth exchange.
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      # Placeholder secret: CI never issues a session a human uses, and no OAuth
+      # exchange runs here, so no real credential belongs in this workflow.
       BETTER_AUTH_SECRET: ci-placeholder-secret-not-used-for-real-sessions
       BETTER_AUTH_URL: http://localhost:3000
     steps:
@@ -34,6 +50,9 @@ jobs:
 
       - name: Generate Prisma client
         run: npm run db:generate
+
+      - name: Apply migrations
+        run: npm run db:deploy
 
       - name: ESLint
         run: npm run lint

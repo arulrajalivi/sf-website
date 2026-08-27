@@ -57,3 +57,29 @@ describe("prisma schema — Better Auth contract", () => {
     );
   });
 });
+
+/**
+ * The committed migrations are what actually reaches a database. Prisma will not
+ * warn if a model is added to the schema and no migration follows, so the table
+ * for every model is asserted to exist in the migration history.
+ */
+describe("prisma migrations", () => {
+  const migrationSql = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../prisma/migrations/20260827000000_init/migration.sql",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+
+  it.each(Object.keys(REQUIRED_MODEL_FIELDS))(
+    "creates the table backing %s",
+    (model) => {
+      const table = modelBody(model).match(/@@map\("([^"]+)"\)/)?.[1];
+      expect(table, `${model} must declare an @@map table name`).toBeDefined();
+      expect(migrationSql).toContain(`CREATE TABLE "${table}"`);
+    },
+  );
+});
