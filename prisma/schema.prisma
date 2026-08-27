@@ -1,8 +1,9 @@
 // Prisma schema for the Multi-Platform Integration Dashboard.
 //
 // This file covers the Better Auth core models (User / Session / Account /
-// Verification) and the requirement → story → task draft spine. Integration and
-// PushRecord models arrive with their own feature slices — see the project spec.
+// Verification), the requirement → story → task draft spine, and the
+// Integration model backing the Jira / Linear / Notion connectors. The
+// PushRecord model arrives with its own feature slice — see the project spec.
 //
 // Table names are lower-cased via @@map because Better Auth's Prisma adapter
 // addresses models by their lower-cased name; the mapping keeps the SQL schema
@@ -18,17 +19,18 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
+  id            String   @id @default(cuid())
   name          String
-  email         String    @unique
-  emailVerified Boolean   @default(false)
+  email         String   @unique
+  emailVerified Boolean  @default(false)
   image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   sessions     Session[]
   accounts     Account[]
   requirements Requirement[]
+  integrations Integration[]
 
   @@map("user")
 }
@@ -133,6 +135,58 @@ model Task {
 
   @@index([storyId])
   @@map("task")
+}
+
+/// Which external work tool an Integration authorizes this app to act on.
+enum Provider {
+  JIRA
+  LINEAR
+  NOTION
+}
+
+/// CONNECTED — usable tokens on file.
+/// EXPIRED   — the provider rejected the token and refresh did not recover it;
+///             the user must reconnect.
+/// DISCONNECTED — the user disconnected; tokens have been cleared.
+enum IntegrationStatus {
+  CONNECTED
+  EXPIRED
+  DISCONNECTED
+}
+
+/// One row per (user, provider) authorization to act on the user's behalf in an
+/// external tool. Distinct from Account, which holds *login* identities.
+///
+/// Two deliberate choices:
+///  - Token columns are nullable and named `…Enc`. The name is a standing
+///    reminder that the column never holds plaintext (see src/lib/crypto.ts);
+///    nullability is what lets disconnect clear the secrets while keeping the
+///    row, so a reconnect reuses the same @@unique([userId, provider]) slot and
+///    the UI can still show that the provider was once connected.
+///  - `status` defaults to DISCONNECTED so a half-written row is never mistaken
+///    for a working connection.
+model Integration {
+  id              String            @id @default(cuid())
+  provider        Provider
+  status          IntegrationStatus @default(DISCONNECTED)
+  /// Human-readable owner of the connection, e.g. "jane@acme.com".
+  accountLabel    String?
+  /// Provider-side workspace handle: Jira cloudId, Linear org id, Notion workspace id.
+  workspaceRef    String?
+  accessTokenEnc  String?
+  refreshTokenEnc String?
+  expiresAt       DateTime?
+  scope           String?
+  lastRefreshedAt DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([userId])
+  @@map("integration")
 }
 
 model Verification {
