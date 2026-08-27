@@ -257,3 +257,34 @@ export function seedRequirement(row: {
   fakeDb.requirements.push(seeded);
   return seeded;
 }
+
+/** Seeds a story and its tasks, for tests that start from an existing draft. */
+export function seedStory(row: {
+  id: string;
+  requirementId: string;
+  title?: string;
+  description?: string;
+  acceptanceCriteria?: string[];
+  order?: number;
+  tasks?: { id: string; title: string; description?: string | null }[];
+}): FakeStoryRow {
+  const story: FakeStoryRow = {
+    id: row.id,
+    requirementId: row.requirementId,
+    title: row.title ?? "A story",
+    description: row.description ?? "As a user, I want something.",
+    acceptanceCriteria: row.acceptanceCriteria ?? ["Given, When, Then."],
+    order: row.order ?? 0,
+  };
+  fakeDb.stories.push(story);
+  (row.tasks ?? []).forEach((task, index) => {
+    fakeDb.tasks.push({
+      id: task.id,
+      storyId: story.id,
+      title: task.title,
+      description: task.description ?? null,
+      order: index,
+    });
+  });
+  return story;
+}

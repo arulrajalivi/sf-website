@@ -50,7 +50,6 @@ export interface RequirementSummary {
 }
 
 const TITLE_MAX_LENGTH = 80;
-export const REQUIREMENT_TEXT_MAX_LENGTH = 20_000;
 
 /**
  * A requirement's list label. Derived rather than asked for: an extra "title"
