@@ -2,8 +2,8 @@
 //
 // This file covers the Better Auth core models (User / Session / Account /
 // Verification), the requirement → story → task draft spine, and the
-// Integration model backing the Jira / Linear / Notion connectors. The
-// PushRecord model arrives with its own feature slice — see the project spec.
+// Integration model backing the Jira / Linear / Notion connectors, and the
+// PushRecord history written by the push engine.
 //
 // Table names are lower-cased via @@map because Better Auth's Prisma adapter
 // addresses models by their lower-cased name; the mapping keeps the SQL schema
@@ -31,6 +31,7 @@ model User {
   accounts     Account[]
   requirements Requirement[]
   integrations Integration[]
+  pushRecords  PushRecord[]
 
   @@map("user")
 }
@@ -93,7 +94,8 @@ model Requirement {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  stories Story[]
+  stories     Story[]
+  pushRecords PushRecord[]
 
   @@index([userId])
   @@map("requirement")
@@ -114,7 +116,8 @@ model Story {
   requirementId String
   requirement   Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
 
-  tasks Task[]
+  tasks       Task[]
+  pushRecords PushRecord[]
 
   @@index([requirementId])
   @@map("story")
@@ -132,6 +135,8 @@ model Task {
 
   storyId String
   story   Story  @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  pushRecords PushRecord[]
 
   @@index([storyId])
   @@map("task")
@@ -184,9 +189,68 @@ model Integration {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  pushRecords PushRecord[]
+
   @@unique([userId, provider])
   @@index([userId])
   @@map("integration")
+}
+
+/// CREATED — the external tool acknowledged the item and returned its id.
+/// FAILED  — the attempt did not produce an external item; `error` says why.
+enum PushStatus {
+  CREATED
+  FAILED
+}
+
+/// One row per attempt to put one draft item into one external tool.
+///
+/// Per-item rather than per-push because partial success is the normal case, not
+/// an edge: a story that reached Jira and a task that did not are two different
+/// facts, and a single per-push row could only record one of them.
+///
+/// Three shape decisions worth stating:
+///  - `externalId` / `externalUrl` are nullable even though the spec sketches
+///    them as required. A FAILED attempt has no external item to point at, and a
+///    placeholder ("", "unknown") would be a link the history renders as working.
+///  - `itemTitle` duplicates the story/task title on purpose. Regenerating a
+///    draft deletes and rewrites its stories, and history that says "a story you
+///    no longer have" answers nothing — the title is what makes an orphaned row
+///    still readable.
+///  - `storyId` / `taskId` / `requirementId` are SetNull rather than Cascade for
+///    the same reason: the record of what went where outlives the draft it came
+///    from.
+model PushRecord {
+  id          String     @id @default(cuid())
+  provider    Provider
+  status      PushStatus
+  /// Jira issue key, Linear issue id, Notion page or block id.
+  externalId  String?
+  externalUrl String?
+  /// Provider-facing failure message. Never response bodies — see lib/integrations/http.ts.
+  error       String?
+  /// Title as pushed, kept readable after the draft is regenerated away.
+  itemTitle   String
+  pushedAt    DateTime   @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  integrationId String
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  requirementId String?
+  requirement   Requirement? @relation(fields: [requirementId], references: [id], onDelete: SetNull)
+
+  storyId String?
+  story   Story?  @relation(fields: [storyId], references: [id], onDelete: SetNull)
+
+  taskId String?
+  task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([userId, pushedAt])
+  @@index([requirementId])
+  @@map("push_record")
 }
 
 model Verification {

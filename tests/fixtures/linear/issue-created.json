@@ -1,0 +1,12 @@
+{
+  "data": {
+    "issueCreate": {
+      "success": true,
+      "issue": {
+        "id": "issue-uuid-1",
+        "identifier": "ENG-42",
+        "url": "https://linear.app/acme/issue/ENG-42/request-a-reset-link"
+      }
+    }
+  }
+}

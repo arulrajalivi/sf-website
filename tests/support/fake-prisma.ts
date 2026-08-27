@@ -1,9 +1,9 @@
 /**
- * An in-memory stand-in for the three tables the generation slice writes.
+ * An in-memory stand-in for the tables the generation and push slices write.
  *
- * The point of these tests is *our* ordering rule — raw text first, rows only
- * after validation — which a mocked `prisma.story.create` proves as well as a
- * live database and without one. What it deliberately does not model is SQL
+ * The point of these tests is *our* rules — raw text first and rows only after
+ * validation, one push record per item — which a mocked delegate proves as well
+ * as a live database and without one. What it deliberately does not model is SQL
  * behaviour (constraints, cascades); the committed migration is exercised
  * against real Postgres in CI instead.
  */
@@ -34,6 +34,38 @@ export interface FakeTaskRow {
   order: number;
 }
 
+export interface FakeIntegrationRow {
+  id: string;
+  userId: string;
+  provider: string;
+  status: string;
+  accountLabel: string | null;
+  workspaceRef: string | null;
+  accessTokenEnc: string | null;
+  refreshTokenEnc: string | null;
+  expiresAt: Date | null;
+  scope: string | null;
+  lastRefreshedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface FakePushRecordRow {
+  id: string;
+  userId: string;
+  integrationId: string;
+  provider: string;
+  status: string;
+  externalId: string | null;
+  externalUrl: string | null;
+  error: string | null;
+  itemTitle: string;
+  requirementId: string | null;
+  storyId: string | null;
+  taskId: string | null;
+  pushedAt: Date;
+}
+
 interface Where {
   id?: string;
   userId?: string;
@@ -46,6 +78,8 @@ class FakeDatabase {
   requirements: FakeRequirementRow[] = [];
   stories: FakeStoryRow[] = [];
   tasks: FakeTaskRow[] = [];
+  integrations: FakeIntegrationRow[] = [];
+  pushRecords: FakePushRecordRow[] = [];
   /** Every story write attempt, including ones inside a rolled-back path. */
   storyCreateCalls = 0;
   private sequence = 0;
@@ -54,6 +88,8 @@ class FakeDatabase {
     this.requirements = [];
     this.stories = [];
     this.tasks = [];
+    this.integrations = [];
+    this.pushRecords = [];
     this.storyCreateCalls = 0;
     this.sequence = 0;
   }
@@ -220,10 +256,77 @@ const taskDelegate = {
   },
 };
 
+const integrationDelegate = {
+  async findUnique({
+    where,
+  }: {
+    where: { userId_provider: { userId: string; provider: string } };
+  }) {
+    const row = fakeDb.integrations.find(
+      (integration) =>
+        integration.userId === where.userId_provider.userId &&
+        integration.provider === where.userId_provider.provider,
+    );
+    return row ? { ...row } : null;
+  },
+
+  async findMany({ where }: { where: { userId: string } }) {
+    return fakeDb.integrations
+      .filter((integration) => integration.userId === where.userId)
+      .map((integration) => ({ ...integration }));
+  },
+
+  async update({
+    where,
+    data,
+  }: {
+    where: { id: string };
+    data: Partial<FakeIntegrationRow>;
+  }) {
+    const row = fakeDb.integrations.find(
+      (integration) => integration.id === where.id,
+    );
+    if (!row) throw new Error(`No integration ${where.id}`);
+    Object.assign(row, data);
+    return { ...row };
+  },
+};
+
+const pushRecordDelegate = {
+  async create({ data }: { data: Omit<FakePushRecordRow, "id" | "pushedAt"> }) {
+    const row: FakePushRecordRow = {
+      ...data,
+      id: fakeDb.nextId("push"),
+      pushedAt: new Date(Date.now() + fakeDb.pushRecords.length),
+    };
+    fakeDb.pushRecords.push(row);
+    return { ...row };
+  },
+
+  async findMany({ where, take }: { where: { userId: string }; take?: number }) {
+    return fakeDb.pushRecords
+      .filter((record) => record.userId === where.userId)
+      .sort((a, b) => b.pushedAt.getTime() - a.pushedAt.getTime())
+      .slice(0, take ?? undefined)
+      .map((record) => ({
+        ...record,
+        requirement: record.requirementId
+          ? {
+              title:
+                fakeDb.requirements.find((r) => r.id === record.requirementId)
+                  ?.title ?? "",
+            }
+          : null,
+      }));
+  },
+};
+
 export interface FakePrismaClient {
   requirement: typeof requirementDelegate;
   story: typeof storyDelegate;
   task: typeof taskDelegate;
+  integration: typeof integrationDelegate;
+  pushRecord: typeof pushRecordDelegate;
   $transaction<T>(fn: (tx: FakePrismaClient) => Promise<T>): Promise<T>;
 }
 
@@ -231,6 +334,8 @@ export const fakePrisma: FakePrismaClient = {
   requirement: requirementDelegate,
   story: storyDelegate,
   task: taskDelegate,
+  integration: integrationDelegate,
+  pushRecord: pushRecordDelegate,
   // No rollback: these tests assert that nothing is *attempted* after a failed
   // validation, which is a stronger property than "it was rolled back".
   async $transaction<T>(fn: (tx: FakePrismaClient) => Promise<T>): Promise<T> {
@@ -255,6 +360,42 @@ export function seedRequirement(row: {
     updatedAt: now,
   };
   fakeDb.requirements.push(seeded);
+  return seeded;
+}
+
+/** Seeds a connected integration, for tests that start from one. */
+export function seedIntegration(row: {
+  id: string;
+  userId: string;
+  provider: string;
+  status?: string;
+  accessTokenEnc?: string | null;
+  refreshTokenEnc?: string | null;
+  workspaceRef?: string | null;
+  accountLabel?: string | null;
+  expiresAt?: Date | null;
+}): FakeIntegrationRow {
+  const now = new Date();
+  const seeded: FakeIntegrationRow = {
+    id: row.id,
+    userId: row.userId,
+    provider: row.provider,
+    status: row.status ?? "CONNECTED",
+    // `in` rather than `??`: an explicit null is the "connected but no site on
+    // file" state, and defaulting it away would hide the case worth testing.
+    accountLabel:
+      "accountLabel" in row ? (row.accountLabel ?? null) : "jane@acme.test",
+    workspaceRef:
+      "workspaceRef" in row ? (row.workspaceRef ?? null) : "workspace-1",
+    accessTokenEnc: row.accessTokenEnc ?? null,
+    refreshTokenEnc: row.refreshTokenEnc ?? null,
+    expiresAt: row.expiresAt ?? null,
+    scope: null,
+    lastRefreshedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  fakeDb.integrations.push(seeded);
   return seeded;
 }
 

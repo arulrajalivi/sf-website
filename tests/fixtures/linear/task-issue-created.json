@@ -1,0 +1,12 @@
+{
+  "data": {
+    "issueCreate": {
+      "success": true,
+      "issue": {
+        "id": "issue-uuid-2",
+        "identifier": "ENG-43",
+        "url": "https://linear.app/acme/issue/ENG-43/add-reset-endpoint"
+      }
+    }
+  }
+}

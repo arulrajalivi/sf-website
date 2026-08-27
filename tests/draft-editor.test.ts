@@ -61,9 +61,7 @@ const {
 const { criteriaToText, textToCriteria, requirementInputSchema } = await import(
   "@/app/dashboard/requirements/draft-form"
 );
-const { PushAffordance, connectedProviderCount } = await import(
-  "@/app/dashboard/requirements/push-affordance"
-);
+const { PushPanel } = await import("@/app/dashboard/requirements/push-panel");
 const { DraftEditor } = await import(
   "@/app/dashboard/requirements/[requirementId]/draft-editor"
 );
@@ -254,28 +252,50 @@ describe("saveStoryAction", () => {
   });
 });
 
-describe("push affordance", () => {
-  it("is disabled and points at Integrations while nothing is connected", () => {
+describe("push panel", () => {
+  const JIRA_CHOICE = { provider: "JIRA" as const, label: "Jira" };
+
+  it("points at Integrations instead of offering a push with nothing connected", () => {
     const markup = renderToStaticMarkup(
-      createElement(PushAffordance, { connectedProviderCount: 0 }),
+      createElement(PushPanel, {
+        requirementId: "req_1",
+        choices: [],
+        hasDraft: true,
+      }),
     );
 
-    expect(markup).toContain("disabled");
     expect(markup).toContain("No tools connected yet");
     expect(markup).toContain("/dashboard/integrations");
+    expect(markup).not.toContain('name="providers"');
   });
 
-  it("stays disabled with a different reason once a tool is connected", () => {
+  it("offers each connected tool as a ticked destination", () => {
     const markup = renderToStaticMarkup(
-      createElement(PushAffordance, { connectedProviderCount: 1 }),
+      createElement(PushPanel, {
+        requirementId: "req_1",
+        choices: [JIRA_CHOICE, { provider: "NOTION" as const, label: "Notion" }],
+        hasDraft: true,
+      }),
     );
 
-    expect(markup).toContain("disabled");
-    expect(markup).toContain("not available yet");
+    expect(markup).toContain('value="JIRA"');
+    expect(markup).toContain('value="NOTION"');
+    expect(markup).toContain('value="req_1"');
+    // The attribute, not the `disabled:` utility class the button always carries.
+    expect(markup).not.toContain('disabled=""');
   });
 
-  it("reports no connections until the connectors change lands", () => {
-    expect(connectedProviderCount()).toBe(0);
+  it("will not push a requirement that has no draft yet", () => {
+    const markup = renderToStaticMarkup(
+      createElement(PushPanel, {
+        requirementId: "req_1",
+        choices: [JIRA_CHOICE],
+        hasDraft: false,
+      }),
+    );
+
+    expect(markup).toContain('disabled=""');
+    expect(markup).toContain("Generate a draft before pushing");
   });
 });
 
