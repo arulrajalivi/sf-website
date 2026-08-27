@@ -1,13 +1,10 @@
+import { redirect } from "next/navigation";
+
+/**
+ * The app has no marketing surface: the root is a doorway. Signed-in visitors
+ * land on the dashboard; everyone else is bounced to sign-in by the dashboard's
+ * own guard, so the rule lives in exactly one place.
+ */
 export default function Home() {
-  return (
-    <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-3 px-6">
-      <h1 className="text-2xl font-semibold tracking-tight">
-        Integration Dashboard
-      </h1>
-      <p className="text-muted text-sm">
-        Requirements in, stories and tasks out — pushed to Jira, Linear, and
-        Notion.
-      </p>
-    </main>
-  );
+  redirect("/dashboard");
 }
