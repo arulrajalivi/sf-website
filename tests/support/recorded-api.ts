@@ -40,6 +40,13 @@ export interface RecordedRoute {
   /** Substring or pattern the request URL must match. */
   url: string | RegExp;
   method?: string;
+  /**
+   * Substring the serialized request body must contain.
+   *
+   * GraphQL providers put every operation on one URL, so the operation name in
+   * the body is the only thing that tells a team lookup from an issue create.
+   */
+  bodyIncludes?: string;
   /** A single reply, reused for every matching call. */
   reply?: RecordedReply;
   /**
@@ -53,14 +60,23 @@ export interface RecordedApi {
   /** Every request the code under test made, in order. */
   calls: RecordedCall[];
   callsTo(url: string | RegExp): RecordedCall[];
+  /** Calls whose serialized body contains `text` — the GraphQL equivalent. */
+  callsWith(text: string): RecordedCall[];
   restore(): void;
 }
 
-function matches(route: RecordedRoute, url: string, method: string): boolean {
-  if (route.method && route.method.toUpperCase() !== method) return false;
+function matches(route: RecordedRoute, call: RecordedCall): boolean {
+  if (route.method && route.method.toUpperCase() !== call.method) return false;
+  if (route.bodyIncludes && !serialize(call.body).includes(route.bodyIncludes)) {
+    return false;
+  }
   return typeof route.url === "string"
-    ? url.includes(route.url)
-    : route.url.test(url);
+    ? call.url.includes(route.url)
+    : route.url.test(call.url);
+}
+
+function serialize(body: unknown): string {
+  return typeof body === "string" ? body : JSON.stringify(body ?? "");
 }
 
 function urlMatches(pattern: string | RegExp, url: string): boolean {
@@ -83,18 +99,17 @@ export function installRecordedApi(routes: RecordedRoute[]): RecordedApi {
     input: RequestInfo | URL,
     init?: RequestInit,
   ): Promise<Response> => {
-    const url = typeof input === "string" ? input : input.toString();
-    const method = (init?.method ?? "GET").toUpperCase();
-    calls.push({
-      url,
-      method,
+    const call: RecordedCall = {
+      url: typeof input === "string" ? input : input.toString(),
+      method: (init?.method ?? "GET").toUpperCase(),
       headers: normalizeHeaders(init?.headers),
       body: parseBody(init?.body),
-    });
+    };
+    calls.push(call);
 
-    const route = routes.find((candidate) => matches(candidate, url, method));
+    const route = routes.find((candidate) => matches(candidate, call));
     if (!route) {
-      throw new Error(`No recorded response for ${method} ${url}`);
+      throw new Error(`No recorded response for ${call.method} ${call.url}`);
     }
 
     const attempt = used.get(route) ?? 0;
@@ -113,6 +128,7 @@ export function installRecordedApi(routes: RecordedRoute[]): RecordedApi {
   return {
     calls,
     callsTo: (pattern) => calls.filter((call) => urlMatches(pattern, call.url)),
+    callsWith: (text) => calls.filter((call) => serialize(call.body).includes(text)),
     restore: () => {
       globalThis.fetch = original;
     },
