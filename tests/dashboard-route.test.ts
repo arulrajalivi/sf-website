@@ -43,6 +43,13 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {} }),
 }));
 
+// The Integrations page reads connection rows; this suite is about the guard and
+// the chrome, so the store answers "nothing connected" and the page's own suite
+// covers the states.
+vi.mock("@/lib/prisma", () => ({
+  prisma: { integration: { findMany: async () => [] } },
+}));
+
 vi.mock("@/lib/auth", () => ({
   getAuth: () => ({
     api: {
@@ -68,11 +75,25 @@ const { DASHBOARD_NAV_ITEMS } = await import("@/app/dashboard/nav-items");
 const DashboardPage = (await import("@/app/dashboard/page")).default;
 const DashboardLayout = (await import("@/app/dashboard/layout")).default;
 
-/** Every guarded surface under /dashboard, by route, with its page component. */
+const IntegrationsPage = (await import("@/app/dashboard/integrations/page"))
+  .default;
+const RequirementsPage = (await import("@/app/dashboard/requirements/page"))
+  .default;
+const PushHistoryPage = (await import("@/app/dashboard/push-history/page"))
+  .default;
+
+/**
+ * Every guarded surface under /dashboard, by route, as a no-argument thunk —
+ * pages take different props as they stop being placeholders, and the guard
+ * assertions below care about none of them.
+ */
 const SECTION_PAGES = [
-  ["/dashboard/integrations", (await import("@/app/dashboard/integrations/page")).default],
-  ["/dashboard/requirements", (await import("@/app/dashboard/requirements/page")).default],
-  ["/dashboard/push-history", (await import("@/app/dashboard/push-history/page")).default],
+  [
+    "/dashboard/integrations",
+    () => IntegrationsPage({ searchParams: Promise.resolve({}) }),
+  ],
+  ["/dashboard/requirements", () => RequirementsPage()],
+  ["/dashboard/push-history", () => PushHistoryPage()],
 ] as const;
 
 const SESSION = {
