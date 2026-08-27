@@ -1,0 +1,5 @@
+{
+  "baseUrl": "https://acme.atlassian.net",
+  "version": "1001.0.0-SNAPSHOT",
+  "deploymentType": "Cloud"
+}

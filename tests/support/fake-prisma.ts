@@ -381,8 +381,12 @@ export function seedIntegration(row: {
     userId: row.userId,
     provider: row.provider,
     status: row.status ?? "CONNECTED",
-    accountLabel: row.accountLabel ?? "jane@acme.test",
-    workspaceRef: row.workspaceRef ?? "workspace-1",
+    // `in` rather than `??`: an explicit null is the "connected but no site on
+    // file" state, and defaulting it away would hide the case worth testing.
+    accountLabel:
+      "accountLabel" in row ? (row.accountLabel ?? null) : "jane@acme.test",
+    workspaceRef:
+      "workspaceRef" in row ? (row.workspaceRef ?? null) : "workspace-1",
     accessTokenEnc: row.accessTokenEnc ?? null,
     refreshTokenEnc: row.refreshTokenEnc ?? null,
     expiresAt: row.expiresAt ?? null,
