@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { providerDefinition } from "@/lib/integrations/providers";
+import { listIntegrations } from "@/lib/integrations/store";
 import { getRequirementDraft } from "@/lib/requirements/service";
 import { requireSession } from "@/lib/session";
 
-import {
-  PushAffordance,
-  connectedProviderCount,
-} from "../push-affordance";
+import type { PushTargetChoice } from "../push-panel";
+import { PushPanel } from "../push-panel";
 import { DraftEditor, RegenerateForm } from "./draft-editor";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +27,16 @@ export default async function RequirementDraftPage({
   // Someone else's requirement is indistinguishable from a missing one — a 404
   // that only appears for rows you own would itself leak which ids exist.
   if (!draft) notFound();
+
+  // Only live connections are offered as destinations. An EXPIRED row is left
+  // out on purpose: its push would fail at the first call, and the Integrations
+  // page is where reconnecting belongs.
+  const choices: PushTargetChoice[] = (await listIntegrations(session.user.id))
+    .filter((integration) => integration.status === "CONNECTED")
+    .map((integration) => ({
+      provider: integration.provider,
+      label: providerDefinition(integration.provider).label,
+    }));
 
   return (
     <section className="flex flex-col gap-6">
@@ -54,7 +64,11 @@ export default async function RequirementDraftPage({
           requirementId={draft.id}
           hasDraft={draft.stories.length > 0}
         />
-        <PushAffordance connectedProviderCount={connectedProviderCount()} />
+        <PushPanel
+          requirementId={draft.id}
+          choices={choices}
+          hasDraft={draft.stories.length > 0}
+        />
       </div>
 
       <DraftEditor stories={draft.stories} />

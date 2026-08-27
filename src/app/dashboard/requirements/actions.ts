@@ -3,7 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import type { Provider } from "@/generated/prisma/enums";
 import { GenerationError, generationErrorMessage } from "@/lib/generation/errors";
+import {
+  NoTargetsSelectedError,
+  NothingToPushError,
+  PushRequirementNotFoundError,
+  pushRequirement,
+} from "@/lib/push/service";
+import { pushTargets } from "@/lib/push/targets";
 import {
   RequirementNotFoundError,
   StoryNotFoundError,
@@ -44,6 +52,78 @@ export type ActionState =
 export const IDLE_ACTION_STATE: ActionState = { status: "idle" };
 
 const REQUIREMENTS_PATH = "/dashboard/requirements";
+const PUSH_HISTORY_PATH = "/dashboard/push-history";
+
+/**
+ * The outcome of a push, as the requirement page shows it.
+ *
+ * `done` covers partial success as well as total success — a push to three
+ * tools where one fails is the normal case this feature exists to survive, so
+ * the state carries counts and one line per provider rather than a boolean.
+ */
+export type PushActionState =
+  | { status: "idle" }
+  | { status: "done"; created: number; failed: number; lines: string[] }
+  | { status: "error"; message: string };
+
+export const IDLE_PUSH_STATE: PushActionState = { status: "idle" };
+
+/**
+ * Pushes a saved draft to the tools the user ticked.
+ *
+ * Providers come from the form, so they are validated against the enum before
+ * they reach the registry: an unknown value would otherwise index it to
+ * `undefined` and fail as a crash instead of a message.
+ */
+export async function pushRequirementAction(
+  _previous: PushActionState,
+  formData: FormData,
+): Promise<PushActionState> {
+  const session = await requireSession();
+  const requirementId = String(formData.get("requirementId") ?? "");
+  if (!requirementId) {
+    return { status: "error", message: "That requirement is no longer available." };
+  }
+
+  const providers = formData
+    .getAll("providers")
+    .map(String)
+    .filter((value): value is Provider => value in pushTargets);
+
+  try {
+    const result = await pushRequirement({
+      userId: session.user.id,
+      requirementId,
+      providers,
+      targets: pushTargets,
+    });
+
+    revalidatePath(PUSH_HISTORY_PATH);
+    return {
+      status: "done",
+      created: result.created,
+      failed: result.failed,
+      lines: result.outcomes.map(
+        (outcome) =>
+          `${outcome.provider}: ${outcome.created} created, ${outcome.failed} failed` +
+          (outcome.error ? ` — ${outcome.error}` : ""),
+      ),
+    };
+  } catch (error) {
+    // Only the three conditions the user can fix are turned into messages; an
+    // unexpected failure keeps its stack rather than being flattened to prose.
+    if (
+      error instanceof NoTargetsSelectedError ||
+      error instanceof NothingToPushError
+    ) {
+      return { status: "error", message: error.message };
+    }
+    if (error instanceof PushRequirementNotFoundError) {
+      return { status: "error", message: "That requirement is no longer available." };
+    }
+    throw error;
+  }
+}
 
 /**
  * Saves the requirement, then generates. The save is committed first and on its
