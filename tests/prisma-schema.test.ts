@@ -18,6 +18,7 @@ const REQUIRED_MODEL_FIELDS: Record<string, readonly string[]> = {
   Session: ["id", "token", "expiresAt", "ipAddress", "userAgent", "userId"],
   Account: [
     "id",
+    "issuer",
     "accountId",
     "providerId",
     "accessToken",
@@ -65,6 +66,18 @@ describe("prisma schema — Better Auth contract", () => {
     expect(modelBody("Session")).toMatch(
       /user\s+User\s+@relation\(fields: \[userId\], references: \[id\], onDelete: Cascade\)/,
     );
+  });
+
+  /**
+   * Better Auth 1.7.2's internal adapter (findAccountOwnerByKey /
+   * findAccountByKey) looks an account up by (issuer, accountId) — not
+   * (providerId, accountId). A future Better Auth bump that renames this key
+   * again must fail this test instead of 500ing every OAuth callback.
+   */
+  it("keys Account lookups the way Better Auth 1.7.2's adapter queries them", () => {
+    const body = modelBody("Account");
+    expect(body).toMatch(/@@unique\(\[issuer, accountId\]\)/);
+    expect(body).not.toMatch(/@@unique\(\[providerId, accountId\]\)/);
   });
 });
 

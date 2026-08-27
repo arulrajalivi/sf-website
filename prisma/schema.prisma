@@ -59,6 +59,10 @@ model Session {
 /// a separate, encrypted-at-rest model added by the integrations slice.
 model Account {
   id                    String    @id @default(cuid())
+  /// Better Auth's lookup key for an account row (renamed from `providerId`
+  /// in its core schema as of 1.7.2 — see the unique index below). Backfilled
+  /// from `providerId` for any row written before this column existed.
+  issuer                String
   accountId             String
   providerId            String
   accessToken           String?
@@ -74,7 +78,11 @@ model Account {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([providerId, accountId])
+  // Better Auth 1.7.2's internal adapter (findAccountOwnerByKey /
+  // findAccountByKey) looks accounts up by (issuer, accountId), not
+  // (providerId, accountId) — this must match its core get-tables schema
+  // exactly or every OAuth callback 500s on lookup.
+  @@unique([issuer, accountId])
   @@index([userId])
   @@map("account")
 }
