@@ -45,9 +45,9 @@ vi.mock("next/navigation", () => ({
 
 // The Integrations page reads connection rows; this suite is about the guard and
 // the chrome, so the store answers "nothing connected" and the page's own suite
-// covers the states.
-vi.mock("@/lib/prisma", () => ({
-  prisma: { integration: { findMany: async () => [] } },
+// covers the connection states.
+vi.mock("@/lib/integrations/store", () => ({
+  listIntegrations: async () => [],
 }));
 
 vi.mock("@/lib/auth", () => ({
