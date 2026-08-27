@@ -61,17 +61,38 @@ export async function requestJson<TSchema extends z.ZodType>(input: {
   schema: TSchema;
 }): Promise<z.infer<TSchema>> {
   const response = await fetch(input.url, input.init);
+  return readJson({
+    provider: input.provider,
+    operation: input.operation,
+    response,
+    schema: input.schema,
+  });
+}
 
-  if (!response.ok) {
+/**
+ * Turns an already-performed response into typed data or a named error.
+ *
+ * Split out of `requestJson` because the push path cannot use it: those requests
+ * go through `withFreshToken`, which owns the fetch so that it can retry a 401
+ * with a refreshed token. Both paths must fail identically on a bad status or an
+ * unexpected shape, and the only way to guarantee that is one implementation.
+ */
+export async function readJson<TSchema extends z.ZodType>(input: {
+  provider: Provider;
+  operation: string;
+  response: Response;
+  schema: TSchema;
+}): Promise<z.infer<TSchema>> {
+  if (!input.response.ok) {
     throw new ProviderRequestError({
       provider: input.provider,
-      status: response.status,
+      status: input.response.status,
       operation: input.operation,
-      detail: (await safeText(response)).slice(0, MAX_DETAIL_CHARS),
+      detail: (await safeText(input.response)).slice(0, MAX_DETAIL_CHARS),
     });
   }
 
-  const body: unknown = await response.json().catch(() => undefined);
+  const body: unknown = await input.response.json().catch(() => undefined);
   const parsed = input.schema.safeParse(body);
   if (!parsed.success) {
     throw new ProviderResponseShapeError({
