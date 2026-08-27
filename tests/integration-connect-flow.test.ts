@@ -11,8 +11,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * a real Atlassian, and all of it breaks silently if it is only reviewed by eye.
  */
 
-process.env.TOKEN_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
-process.env.BETTER_AUTH_URL ??= "https://app.example.test";
+// Assigned, not defaulted: CI exports its own BETTER_AUTH_URL, and a redirect_uri
+// assertion that silently adopts the ambient value passes locally and fails
+// there. The suite owns every input it asserts on.
+process.env.TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+process.env.BETTER_AUTH_URL = "https://app.example.test";
+delete process.env.APP_URL;
 process.env.INTEGRATION_JIRA_CLIENT_ID = "jira-client";
 process.env.INTEGRATION_JIRA_CLIENT_SECRET = "jira-secret";
 process.env.INTEGRATION_LINEAR_CLIENT_ID = "linear-client";
