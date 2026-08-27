@@ -1,0 +1,274 @@
+// Prisma schema for the Multi-Platform Integration Dashboard.
+//
+// This file covers the Better Auth core models (User / Session / Account /
+// Verification), the requirement → story → task draft spine, and the
+// Integration model backing the Jira / Linear / Notion connectors, and the
+// PushRecord history written by the push engine.
+//
+// Table names are lower-cased via @@map because Better Auth's Prisma adapter
+// addresses models by their lower-cased name; the mapping keeps the SQL schema
+// consistent with that convention.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String   @id @default(cuid())
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions     Session[]
+  accounts     Account[]
+  requirements Requirement[]
+  integrations Integration[]
+  pushRecords  PushRecord[]
+
+  @@map("user")
+}
+
+/// Sessions live in Postgres (not in a signed cookie) so that sign-out and
+/// revocation take effect immediately across devices.
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+/// One row per social identity (Google / Microsoft Entra ID / GitHub).
+/// These are *login* identities — integration tokens for Jira/Linear/Notion are
+/// a separate, encrypted-at-rest model added by the integrations slice.
+model Account {
+  id                    String    @id @default(cuid())
+  /// Better Auth's lookup key for an account row (renamed from `providerId`
+  /// in its core schema as of 1.7.2 — see the unique index below). Backfilled
+  /// from `providerId` for any row written before this column existed.
+  issuer                String
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Better Auth 1.7.2's internal adapter (findAccountOwnerByKey /
+  // findAccountByKey) looks accounts up by (issuer, accountId), not
+  // (providerId, accountId) — this must match its core get-tables schema
+  // exactly or every OAuth callback 500s on lookup.
+  @@unique([issuer, accountId])
+  @@index([userId])
+  @@map("account")
+}
+
+/// A requirement as the user typed it, saved before any LLM call runs.
+///
+/// `rawText` is the durable part: generation can fail (rate limit, malformed
+/// output) and the user must be able to retry without retyping, so the row is
+/// written first and the draft is attached to it afterwards.
+model Requirement {
+  id        String   @id @default(cuid())
+  title     String
+  rawText   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  stories     Story[]
+  pushRecords PushRecord[]
+
+  @@index([userId])
+  @@map("requirement")
+}
+
+/// One generated user story, editable in-app before it is pushed anywhere.
+model Story {
+  id                 String   @id @default(cuid())
+  title              String
+  description        String
+  /// Given/When/Then lines, kept ordered as written.
+  acceptanceCriteria String[]
+  /// Display order within the requirement; regeneration rewrites the set.
+  order              Int
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  requirementId String
+  requirement   Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+
+  tasks       Task[]
+  pushRecords PushRecord[]
+
+  @@index([requirementId])
+  @@map("story")
+}
+
+/// A unit of work under a story. Pushed as a Jira subtask / Linear issue /
+/// Notion to-do by the push slice; here it is draft content only.
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  order       Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  storyId String
+  story   Story  @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  pushRecords PushRecord[]
+
+  @@index([storyId])
+  @@map("task")
+}
+
+/// Which external work tool an Integration authorizes this app to act on.
+enum Provider {
+  JIRA
+  LINEAR
+  NOTION
+}
+
+/// CONNECTED — usable tokens on file.
+/// EXPIRED   — the provider rejected the token and refresh did not recover it;
+///             the user must reconnect.
+/// DISCONNECTED — the user disconnected; tokens have been cleared.
+enum IntegrationStatus {
+  CONNECTED
+  EXPIRED
+  DISCONNECTED
+}
+
+/// One row per (user, provider) authorization to act on the user's behalf in an
+/// external tool. Distinct from Account, which holds *login* identities.
+///
+/// Two deliberate choices:
+///  - Token columns are nullable and named `…Enc`. The name is a standing
+///    reminder that the column never holds plaintext (see src/lib/crypto.ts);
+///    nullability is what lets disconnect clear the secrets while keeping the
+///    row, so a reconnect reuses the same @@unique([userId, provider]) slot and
+///    the UI can still show that the provider was once connected.
+///  - `status` defaults to DISCONNECTED so a half-written row is never mistaken
+///    for a working connection.
+model Integration {
+  id              String            @id @default(cuid())
+  provider        Provider
+  status          IntegrationStatus @default(DISCONNECTED)
+  /// Human-readable owner of the connection, e.g. "jane@acme.com".
+  accountLabel    String?
+  /// Provider-side workspace handle: Jira cloudId, Linear org id, Notion workspace id.
+  workspaceRef    String?
+  accessTokenEnc  String?
+  refreshTokenEnc String?
+  expiresAt       DateTime?
+  scope           String?
+  lastRefreshedAt DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  pushRecords PushRecord[]
+
+  @@unique([userId, provider])
+  @@index([userId])
+  @@map("integration")
+}
+
+/// CREATED — the external tool acknowledged the item and returned its id.
+/// FAILED  — the attempt did not produce an external item; `error` says why.
+enum PushStatus {
+  CREATED
+  FAILED
+}
+
+/// One row per attempt to put one draft item into one external tool.
+///
+/// Per-item rather than per-push because partial success is the normal case, not
+/// an edge: a story that reached Jira and a task that did not are two different
+/// facts, and a single per-push row could only record one of them.
+///
+/// Three shape decisions worth stating:
+///  - `externalId` / `externalUrl` are nullable even though the spec sketches
+///    them as required. A FAILED attempt has no external item to point at, and a
+///    placeholder ("", "unknown") would be a link the history renders as working.
+///  - `itemTitle` duplicates the story/task title on purpose. Regenerating a
+///    draft deletes and rewrites its stories, and history that says "a story you
+///    no longer have" answers nothing — the title is what makes an orphaned row
+///    still readable.
+///  - `storyId` / `taskId` / `requirementId` are SetNull rather than Cascade for
+///    the same reason: the record of what went where outlives the draft it came
+///    from.
+model PushRecord {
+  id          String     @id @default(cuid())
+  provider    Provider
+  status      PushStatus
+  /// Jira issue key, Linear issue id, Notion page or block id.
+  externalId  String?
+  externalUrl String?
+  /// Provider-facing failure message. Never response bodies — see lib/integrations/http.ts.
+  error       String?
+  /// Title as pushed, kept readable after the draft is regenerated away.
+  itemTitle   String
+  pushedAt    DateTime   @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  integrationId String
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  requirementId String?
+  requirement   Requirement? @relation(fields: [requirementId], references: [id], onDelete: SetNull)
+
+  storyId String?
+  story   Story?  @relation(fields: [storyId], references: [id], onDelete: SetNull)
+
+  taskId String?
+  task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([userId, pushedAt])
+  @@index([requirementId])
+  @@map("push_record")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
