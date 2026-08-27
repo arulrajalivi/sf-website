@@ -37,6 +37,10 @@ vi.mock("next/navigation", () => ({
   redirect: (path: string) => {
     throw new RedirectError(path);
   },
+  // The shell's client components run inline under renderToStaticMarkup, so the
+  // navigation hooks they call need stand-ins too.
+  usePathname: () => "/dashboard",
+  useRouter: () => ({ refresh: () => {} }),
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -52,7 +56,16 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 const { SIGN_IN_PATH, getCurrentSession } = await import("@/lib/session");
+const { DASHBOARD_NAV_ITEMS } = await import("@/app/dashboard/nav-items");
 const DashboardPage = (await import("@/app/dashboard/page")).default;
+const DashboardLayout = (await import("@/app/dashboard/layout")).default;
+
+/** Every guarded surface under /dashboard, by route, with its page component. */
+const SECTION_PAGES = [
+  ["/dashboard/integrations", (await import("@/app/dashboard/integrations/page")).default],
+  ["/dashboard/requirements", (await import("@/app/dashboard/requirements/page")).default],
+  ["/dashboard/push-history", (await import("@/app/dashboard/push-history/page")).default],
+] as const;
 
 const SESSION = {
   session: { id: "sess_1", token: "valid-token", userId: "user_1" },
@@ -85,6 +98,44 @@ describe("GET /dashboard", () => {
 
     const markup = renderToStaticMarkup(await DashboardPage());
 
+    expect(markup).toContain("jane@acme.com");
+  });
+});
+
+describe("dashboard shell", () => {
+  it.each(SECTION_PAGES)(
+    "redirects an unauthenticated request to %s",
+    async (_route, Page) => {
+      await expect(Page()).rejects.toMatchObject({ path: SIGN_IN_PATH });
+    },
+  );
+
+  it.each(SECTION_PAGES)(
+    "renders the section heading at %s for a signed-in user",
+    async (route, Page) => {
+      state.cookieHeader = "better-auth.session_token=valid-token";
+      const item = DASHBOARD_NAV_ITEMS.find((navItem) => navItem.href === route);
+
+      const markup = renderToStaticMarkup(await Page());
+
+      expect(markup).toContain(item?.label);
+    },
+  );
+
+  it("redirects the chrome itself when there is no session", async () => {
+    await expect(
+      DashboardLayout({ children: null }),
+    ).rejects.toMatchObject({ path: SIGN_IN_PATH });
+  });
+
+  it("shows every section and the signed-in identity in the chrome", async () => {
+    state.cookieHeader = "better-auth.session_token=valid-token";
+
+    const markup = renderToStaticMarkup(await DashboardLayout({ children: null }));
+
+    for (const { label } of DASHBOARD_NAV_ITEMS) {
+      expect(markup).toContain(label);
+    }
     expect(markup).toContain("jane@acme.com");
   });
 });
